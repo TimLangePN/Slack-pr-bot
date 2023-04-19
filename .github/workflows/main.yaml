@@ -1,0 +1,56 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  Deploy:
+    runs-on: 
+      group: AWS
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Install AWS CLI
+      uses: unfor19/install-aws-cli-action@v1
+      with:
+        version: 2
+
+    - name: Assume role
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE }}
+        aws-region: ${{ secrets.AWS_REGION }}
+        role-duration-seconds: 1200
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+
+    - name: Package and upload Lambda dependencies
+      run: |
+        mkdir python
+        pip install -r requirements.txt -t python/
+        zip -r dependencies.zip python
+        aws s3 cp dependencies.zip s3://slack-pr-notify-lambda/dependencies.zip
+
+    - name: Package and upload Lambda package
+      run: |
+        cd Slack-Event-Notify
+        zip -r ../Slack-Event-Notify-${{ github.run_number }}.zip .
+        cd ..
+        aws s3 cp Slack-Event-Notify-${{ github.run_number }}.zip s3://slack-pr-notify-lambda/Slack-Event-Notify-${{ github.run_number }}.zip --metadata-directive REPLACE
+
+    - name: Create or update CloudFormation stack
+      run: |
+        if aws cloudformation describe-stacks --stack-name Slack-Event-Notify; then
+          echo "Updating existing stack..."
+          aws cloudformation update-stack --stack-name Slack-Event-Notify --template-body file://templates/event-lambda-template.yaml --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM CAPABILITY_IAM --parameters ParameterKey=GithubOrg,ParameterValue=${{ secrets.REMIND_GITHUB_ORG }} ParameterKey=GithubToken,ParameterValue=${{ secrets.REMIND_GITHUB_TOKEN }} ParameterKey=SlackBotToken,ParameterValue=${{ secrets.REMIND_SLACK_BOT_TOKEN }} ParameterKey=SlackChannel,ParameterValue=${{ secrets.REMIND_SLACK_CHANNEL }} ParameterKey=RunNumber,ParameterValue=${{ github.run_number }}
+        else
+          echo "Creating a new stack..."
+          aws cloudformation create-stack --stack-name Slack-Event-Notify --template-body file://templates/event-lambda-template.yaml --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM CAPABILITY_IAM --parameters ParameterKey=GithubOrg,ParameterValue=${{ secrets.REMIND_GITHUB_ORG }} ParameterKey=GithubToken,ParameterValue=${{ secrets.REMIND_GITHUB_TOKEN }} ParameterKey=SlackBotToken,ParameterValue=${{ secrets.REMIND_SLACK_BOT_TOKEN }} ParameterKey=SlackChannel,ParameterValue=${{ secrets.REMIND_SLACK_CHANNEL }} ParameterKey=RunNumber,ParameterValue=${{ github.run_number }}
+        fi
