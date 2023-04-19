@@ -1,2 +1,2 @@
 # Slack-pr-bot
-Slack Notify EventBride Lambda + EC2 Listener app
+Slack Pull Request Reminder, uses AWS Lambda + Eventbridge Scheduler
